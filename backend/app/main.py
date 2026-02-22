@@ -1,122 +1,96 @@
 from __future__ import annotations
 
 import os
-from datetime import date
-from typing import Optional, Dict, Any, List
+import time
+from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .settings import settings
+# --- Config (ENV) ---
+API_KEY = os.getenv("API_KEY")  # obligatoire pour endpoints protégés
+SERVICE_NAME = os.getenv("SERVICE_NAME", "terranovaexotics-api")
+RENDER_GIT_COMMIT = os.getenv("RENDER_GIT_COMMIT", "unknown")
 
-app = FastAPI(title="Terranova API")
+app = FastAPI(title="Terranova Exotics API")
 
 
-# -----------------------------
-# Models
-# -----------------------------
+# --- Models ---
 class ReadingIn(BaseModel):
-    terrarium_id: str = Field(..., min_length=1)
+    terrarium_id: str = Field(..., min_length=1, max_length=64)
     temperature_c: Optional[float] = None
     humidity_pct: Optional[float] = None
     source: str = "esp32"
 
 
-# -----------------------------
-# Security
-# -----------------------------
+# --- Helpers ---
 def require_key(x_api_key: Optional[str]) -> None:
-    """
-    Simple API key check using header 'x-api-key'.
-    Value must match settings.API_KEY (from env on Render).
-    """
-    expected = getattr(settings, "API_KEY", None)
-    if not expected:
-        # Misconfiguration: API_KEY not set in environment
-        raise HTTPException(status_code=500, detail="Server misconfigured: API_KEY not set")
+    # Si API_KEY n'est pas configurée sur Render, on bloque proprement au lieu de faire planter.
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="Server not configured: API_KEY missing")
 
-    if not x_api_key or x_api_key != expected:
+    if not x_api_key or x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-# -----------------------------
-# Basic endpoints
-# -----------------------------
+# --- Global error handler (pour éviter les 500 “muets”) ---
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Log minimal en console Render
+    print("UNHANDLED_ERROR:", repr(exc))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+    )
+
+
+# --- Routes ---
 @app.get("/")
-def root() -> Dict[str, Any]:
+def root():
     return {"status": "Terranova Exotics API is running"}
 
-
 @app.get("/health")
-def health() -> Dict[str, bool]:
+def health():
     return {"ok": True}
 
-
 @app.get("/version")
-def version() -> Dict[str, str]:
+def version():
     return {
-        "render_commit": os.getenv("RENDER_GIT_COMMIT", "unknown"),
-        "service": os.getenv("RENDER_SERVICE_NAME", "terranovaexotics-api"),
+        "service": SERVICE_NAME,
+        "render_commit": RENDER_GIT_COMMIT,
+        "api_key_configured": bool(API_KEY),
     }
 
-
-# -----------------------------
-# API v1
-# -----------------------------
 @app.post("/api/v1/readings")
-def post_reading(payload: ReadingIn, x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
-    """
-    Receives sensor readings (ESP32, etc.). For now: returns success.
-    Later: insert into Supabase/Postgres + trigger alerts.
-    """
+def post_reading(payload: ReadingIn, x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
 
-    # TODO: save into DB (Supabase/Postgres)
-    # Example return only
+    # Ici, pas de DB encore : on confirme juste que l'API reçoit bien les données.
+    now = int(time.time())
     return {
         "saved": True,
-        "terrarium_id": payload.terrarium_id,
-        "temperature_c": payload.temperature_c,
-        "humidity_pct": payload.humidity_pct,
-        "source": payload.source,
+        "ts": now,
+        "reading": payload.model_dump(),
     }
 
 
 @app.get("/api/v1/dashboard/today")
-def dashboard_today(x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
-    """
-    Summary for today: terrariums status, alerts, tasks, low stock.
-    """
+def dashboard_today(x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
-
-    return {
-        "terrariums": [],
-        "alerts_active": [],
-        "tasks_today": [],
-        "low_stock": [],
-    }
-
+    return {"terrariums": [], "alerts_active": [], "tasks_today": [], "low_stock": []}
 
 @app.get("/api/v1/alerts")
-def get_alerts(
-    status: str = "ACTIVE",
-    x_api_key: Optional[str] = Header(default=None),
-) -> Dict[str, Any]:
+def get_alerts(status: str = "ACTIVE", x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
     return {"items": [], "status": status}
 
-
 @app.get("/api/v1/tasks")
-def get_tasks(
-    day: Optional[date] = None,
-    x_api_key: Optional[str] = Header(default=None),
-) -> Dict[str, Any]:
+def get_tasks(day: Optional[str] = None, x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
-    resolved_day = day or date.today()
-    return {"items": [], "day": resolved_day.isoformat()}
-
+    return {"items": [], "day": day or "today"}
 
 @app.get("/api/v1/inventory/low-stock")
-def low_stock(x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+def low_stock(x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
     return {"items": []}
