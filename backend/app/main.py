@@ -5,6 +5,10 @@ from .settings import settings
 
 app = FastAPI(title="Terranova V3 API")
 
+@app.get("/")
+def root():
+    return {"status": "Terranova Exotics API is running"}
+
 class ReadingIn(BaseModel):
     terrarium_id: str
     temperature_c: float | None = None
