@@ -3,7 +3,16 @@ from pydantic import BaseModel
 from datetime import date
 from .settings import settings
 
-app = FastAPI(title="Terranova V3 API")
+app = FastAPI(title="Terranova API")
+
+import os
+
+@app.get("/version")
+def version():
+    return {
+        "render_commit": os.getenv("RENDER_GIT_COMMIT", "unknown"),
+        "service": "terranoexotics-api"
+    }
 
 @app.get("/")
 def root():
