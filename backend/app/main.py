@@ -2,6 +2,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from datetime import date
 from .settings import settings
+from .db import db_exec
 
 app = FastAPI(title="Terranova API")
 
@@ -35,7 +36,27 @@ def health():
 @app.post("/api/v1/readings")
 def post_reading(payload: ReadingIn, x_api_key: str | None = Header(default=None)):
     require_key(x_api_key)
-    # Étape suivante : insert DB + logique alertes
+
+    # 1) s'assurer que le terrarium existe
+    db_exec(
+        "insert into terrariums(id) values (:id) on conflict (id) do nothing",
+        {"id": payload.terrarium_id},
+    )
+
+    # 2) insérer la lecture
+    db_exec(
+        """
+        insert into readings(terrarium_id, temperature_c, humidity_pct, source)
+        values (:tid, :t, :h, :src)
+        """,
+        {
+            "tid": payload.terrarium_id,
+            "t": payload.temperature_c,
+            "h": payload.humidity_pct,
+            "src": payload.source,
+        },
+    )
+
     return {"saved": True, "terrarium_id": payload.terrarium_id}
 
 @app.get("/api/v1/dashboard/today")

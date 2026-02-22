@@ -1,0 +1,13 @@
+import os
+from sqlalchemy import create_engine, text
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+)
+
+def db_exec(query: str, params: dict | None = None):
+    with engine.begin() as conn:
+        return conn.execute(text(query), params or {})
