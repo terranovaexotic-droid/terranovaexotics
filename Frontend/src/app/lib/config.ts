@@ -7,4 +7,5 @@ export const WS_BASE =
     ? API_BASE.replace("https", "wss")
     : API_BASE.replace("http", "ws"));
 
+// IMPORTANT: URL websocket complète (avec le path)
 export const WS_URL = `${WS_BASE}/ws/sensor`;
