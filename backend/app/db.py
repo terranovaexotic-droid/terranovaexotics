@@ -1,29 +1,11 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from supabase import create_client, Client
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+def get_supabase() -> Client:
+    url = os.getenv("SUPABASE_URL", "").strip()
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set")
+    if not url or not key:
+        raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY manquants dans .env")
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True
-)
-
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
-
-Base = declarative_base()
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return create_client(url, key)
