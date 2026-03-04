@@ -1,4 +1,4 @@
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, 
   Box, 
@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { path: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { path: "/terrariums", icon: Box, label: "Terrariums" },
   { path: "/inventory", icon: Package, label: "Inventaire" },
   { path: "/sensors", icon: Gauge, label: "Capteurs" },
