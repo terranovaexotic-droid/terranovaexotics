@@ -12,7 +12,7 @@ import {
   Bell
 } from "lucide-react";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 
 // Mock data
 const temperatureData = [
