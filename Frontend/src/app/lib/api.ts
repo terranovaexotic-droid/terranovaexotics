@@ -1,25 +1,48 @@
 import { API_BASE } from "./config";
 
-export type Reading = {
-  sensor_id: string;
-  temperature: number | null;
-  humidity: number | null;
-  created_at: string;
-};
-
-export async function postReading(payload: {
-  sensor_id: string;
-  temperature?: number | null;
-  humidity?: number | null;
-}): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/readings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
+async function check(res: Response) {
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`POST /api/readings failed: ${res.status} ${text}`);
+    const txt = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText} ${txt}`);
   }
+  return res;
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  const res = await check(fetch(`${API_BASE}${path}`, { credentials: "include" }));
+  return res.json();
+}
+
+export async function apiPost<T>(path: string, body: any): Promise<T> {
+  const res = await check(
+    fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body),
+    })
+  );
+  return res.json();
+}
+
+export async function apiPut<T>(path: string, body: any): Promise<T> {
+  const res = await check(
+    fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body),
+    })
+  );
+  return res.json();
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await check(
+    fetch(`${API_BASE}${path}`, {
+      method: "DELETE",
+      credentials: "include",
+    })
+  );
+  return res.json();
 }
