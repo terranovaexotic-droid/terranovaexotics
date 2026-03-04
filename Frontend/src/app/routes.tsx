@@ -1,5 +1,4 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
-
 import Dashboard from "./pages/Dashboard";
 import TerrariumsList from "./pages/TerrariumsList";
 import TerrariumDetail from "./pages/TerrariumDetail";
