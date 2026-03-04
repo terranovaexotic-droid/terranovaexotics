@@ -6,13 +6,13 @@
     --card: rgba(255, 255, 255, 0.04);
     --card-foreground: #e8f5f2;
 
-    --border: rgba(255, 255, 255, 0.10);
+    --border: rgba(255, 255, 255, 0.12);
     --ring: rgba(212, 175, 55, 0.35);
 
-    --primary: #d4af37; /* or */
+    --primary: #d4af37;
     --primary-foreground: #0c0f0e;
 
-    --accent: #0ea5a4; /* vert/teal */
+    --accent: #10b981; /* emerald */
     --accent-foreground: #0c0f0e;
   }
 
