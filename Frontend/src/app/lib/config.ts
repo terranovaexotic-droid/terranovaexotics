@@ -1,5 +1,4 @@
+// src/app/lib/config.ts
 export const API_BASE =
-  import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
-
-export const WS_URL =
-  import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws/sensor";
+  (import.meta as any).env?.VITE_API_BASE?.trim() ||
+  "http://localhost:8000"; // en local

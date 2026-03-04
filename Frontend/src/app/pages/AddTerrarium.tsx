@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiPost } from "../lib/http";
 
 type TerrariumCreatePayload = {
   name: string;
@@ -13,39 +14,6 @@ type TerrariumCreatePayload = {
 function toNumberOrNull(v: string): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-async function postJSON<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  // lire la réponse (json ou texte)
-  const text = await res.text();
-  let data: any = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text || null;
-  }
-
-  if (!res.ok) {
-    const detail = data?.detail;
-    const msg =
-      typeof detail === "string"
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((x) => x?.msg || JSON.stringify(x)).join(" | ")
-          : typeof data === "string"
-            ? data
-            : data?.message || "Erreur lors de la création du terrarium.";
-
-    throw new Error(msg);
-  }
-
-  return data as T;
 }
 
 export default function AddTerrarium() {
@@ -81,10 +49,10 @@ export default function AddTerrarium() {
     };
 
     try {
-      await postJSON("/api/terrariums", payload);
+      await apiPost("/api/terrariums", payload);
       navigate("/terrariums", { replace: true });
     } catch (err: any) {
-      setError(err?.message || "Erreur");
+      setError(err?.message || "Erreur lors de la création du terrarium.");
     } finally {
       setLoading(false);
     }
@@ -136,7 +104,7 @@ export default function AddTerrarium() {
           <input
             value={species}
             onChange={(e) => setSpecies(e.target.value)}
-            placeholder="Ex: Gecko gargouille"
+            placeholder="Ex: gecko à crête"
             className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-[#D4AF37]/30"
           />
         </div>
@@ -164,7 +132,7 @@ export default function AddTerrarium() {
             <input
               value={targetTemp}
               onChange={(e) => setTargetTemp(e.target.value)}
-              placeholder="Ex: 26.0"
+              placeholder="Ex: 26"
               inputMode="decimal"
               className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-[#D4AF37]/30"
             />
