@@ -1,17 +1,18 @@
-import { createBrowserRouter } from "react-router-dom";
-import Dashboard from "./pages/Dashboard";
-import TerrariumsList from "./pages/TerrariumsList";
-import TerrariumDetail from "./pages/TerrariumDetail";
-import AddTerrarium from "./pages/AddTerrarium";
-import Inventory from "./pages/Inventory";
-import AddInventoryItem from "./pages/AddInventoryItem";
-import Tasks from "./pages/Tasks";
-import Notifications from "./pages/Notifications";
-import Statistics from "./pages/Statistics";
-import Settings from "./pages/Settings";
-import Users from "./pages/Users";
-import Sensors from "./pages/Sensors";
-import NotFound from "./pages/NotFound";
+import { createBrowserRouter } from "react-router";
+
+import Dashboard from "./app/pages/Dashboard";
+import TerrariumsList from "./app/pages/TerrariumsList";
+import TerrariumDetail from "./app/pages/TerrariumDetail";
+import AddTerrarium from "./app/pages/AddTerrarium";
+import Inventory from "./app/pages/Inventory";
+import AddInventoryItem from "./app/pages/AddInventoryItem";
+import Tasks from "./app/pages/Tasks";
+import Notifications from "./app/pages/Notifications";
+import Statistics from "./app/pages/Statistics";
+import Settings from "./app/pages/Settings";
+import Users from "./app/pages/Users";
+import Sensors from "./app/pages/Sensors";
+import NotFound from "./app/pages/NotFound";
 
 export const router = createBrowserRouter([
   { path: "/", Component: Dashboard },
