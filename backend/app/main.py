@@ -2,225 +2,361 @@ from __future__ import annotations
 
 import os
 import json
+import time
 import asyncio
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
-# Supabase (backend only)
-from supabase import create_client, Client  # pip: supabase
-
+# -------------------------
+# Config
+# -------------------------
 APP_NAME = os.getenv("APP_NAME", "Terranova Exotics Backend")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+DEFAULT_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
-# Exemple Render env:
-# CORS_ORIGINS = "https://terranovaexotics.vercel.app,https://terranovaexotics-xxxx.vercel.app"
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").strip()
+FRONTEND_ORIGINS_ENV = os.getenv("FRONTEND_ORIGINS", "")
+EXTRA_ORIGINS = [o.strip() for o in FRONTEND_ORIGINS_ENV.split(",") if o.strip()]
+ALLOWED_ORIGINS = list(dict.fromkeys(DEFAULT_ORIGINS + EXTRA_ORIGINS))
 
-WS_PATH = os.getenv("WS_PATH", "/ws/sensor").strip()          # Frontend WS
-READINGS_BROADCAST = os.getenv("READINGS_BROADCAST", "1") == "1"
+# Autoriser tous les previews vercel si tu veux (optionnel)
+ALLOW_VERCEL_REGEX = os.getenv("ALLOW_VERCEL_REGEX", "1") == "1"
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-    # On laisse démarrer, mais les routes DB vont retourner 500 avec message clair
-    supabase: Optional[Client] = None
-else:
-    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+WS_PATH = os.getenv("WS_PATH", "/ws/sensor")
 
-# ---------- Models ----------
-class TerrariumCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    species: Optional[str] = Field(default=None, max_length=120)
-    sensor_id: Optional[str] = Field(default=None, max_length=50)
-    target_temp: Optional[float] = None
-    target_humidity: Optional[float] = None
-    status: Optional[str] = Field(default="ok", max_length=30)
+SIM_ENABLED = os.getenv("SIM_ENABLED", "0") == "1"
+SIM_INTERVAL_SEC = float(os.getenv("SIM_INTERVAL_SEC", "1.0"))
 
-class TerrariumOut(BaseModel):
-    id: int
-    name: str
-    species: Optional[str] = None
-    sensor_id: Optional[str] = None
-    target_temp: Optional[float] = None
-    target_humidity: Optional[float] = None
-    status: Optional[str] = None
-    last_temperature: Optional[float] = None
-    last_humidity: Optional[float] = None
-    created_at: Optional[str] = None
-
-class ReadingIn(BaseModel):
-    sensor_id: str = Field(min_length=1, max_length=50)
-    temperature: float
-    humidity: float
-    ts: Optional[str] = None  # ISO string optional
-
-# ---------- App ----------
-app = FastAPI(title=APP_NAME)
-
-# CORS
-if CORS_ORIGINS == "*":
-    origins = ["*"]
-else:
-    origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+# -------------------------
+# App
+# -------------------------
+app = FastAPI(title=APP_NAME, version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=False,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https://.*\.vercel\.app$" if ALLOW_VERCEL_REGEX else None,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------- WebSocket manager ----------
+# -------------------------
+# Storage (JSON simple)
+# -------------------------
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+TERRARIUMS_FILE = os.path.join(DATA_DIR, "terrariums.json")
+READINGS_FILE = os.path.join(DATA_DIR, "readings.json")
+
+
+def _read_json(path: str, default: Any) -> Any:
+    try:
+        if not os.path.exists(path):
+            return default
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _write_json(path: str, value: Any) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(value, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _ensure_files() -> None:
+    if not os.path.exists(TERRARIUMS_FILE):
+        _write_json(TERRARIUMS_FILE, [])
+    if not os.path.exists(READINGS_FILE):
+        _write_json(READINGS_FILE, [])
+
+
+_ensure_files()
+
+
+def _next_id(items: List[Dict[str, Any]]) -> int:
+    m = 0
+    for it in items:
+        try:
+            m = max(m, int(it.get("id", 0)))
+        except Exception:
+            pass
+    return m + 1
+
+
+# -------------------------
+# WebSocket manager
+# -------------------------
 class WSManager:
     def __init__(self) -> None:
-        self.clients: Set[WebSocket] = set()
-        self.lock = asyncio.Lock()
+        self.clients: List[WebSocket] = []
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
-        async with self.lock:
-            self.clients.add(ws)
+        self.clients.append(ws)
 
-    async def disconnect(self, ws: WebSocket) -> None:
-        async with self.lock:
-            if ws in self.clients:
-                self.clients.remove(ws)
+    def disconnect(self, ws: WebSocket) -> None:
+        if ws in self.clients:
+            self.clients.remove(ws)
 
     async def broadcast(self, payload: Dict[str, Any]) -> None:
-        msg = json.dumps(payload, ensure_ascii=False)
-        async with self.lock:
-            clients = list(self.clients)
-        if not clients:
-            return
         dead: List[WebSocket] = []
-        for ws in clients:
+        msg = json.dumps(payload)
+        for ws in self.clients:
             try:
                 await ws.send_text(msg)
             except Exception:
                 dead.append(ws)
-        if dead:
-            async with self.lock:
-                for ws in dead:
-                    self.clients.discard(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
 
 ws_manager = WSManager()
 
-# ---------- Helpers ----------
-def _require_supabase() -> Client:
-    if supabase is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Supabase n'est pas configuré. Ajoute SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sur Render.",
-        )
-    return supabase
-
-# ---------- Routes ----------
-@app.get("/health")
-def health() -> Dict[str, Any]:
-    return {"ok": True, "name": APP_NAME, "ws_path": WS_PATH}
-
-@app.get("/api/terrariums", response_model=List[TerrariumOut])
-def list_terrariums() -> List[TerrariumOut]:
-    sb = _require_supabase()
-    res = sb.table("terrariums").select("*").order("id", desc=False).execute()
-    data = res.data or []
-    # Normalisation created_at -> str
-    out: List[TerrariumOut] = []
-    for r in data:
-        if isinstance(r.get("created_at"), str):
-            created = r.get("created_at")
-        else:
-            created = str(r.get("created_at")) if r.get("created_at") is not None else None
-        r["created_at"] = created
-        out.append(TerrariumOut(**r))
-    return out
-
-@app.post("/api/terrariums", response_model=TerrariumOut)
-def create_terrarium(payload: TerrariumCreate) -> TerrariumOut:
-    sb = _require_supabase()
-
-    insert_obj = {
-        "name": payload.name.strip(),
-        "species": payload.species.strip() if payload.species else None,
-        "sensor_id": payload.sensor_id.strip() if payload.sensor_id else None,
-        "target_temp": payload.target_temp,
-        "target_humidity": payload.target_humidity,
-        "status": payload.status or "ok",
-        "created_at": datetime.utcnow().isoformat(),
-    }
-
-    res = sb.table("terrariums").insert(insert_obj).execute()
-    if not res.data:
-        raise HTTPException(status_code=500, detail="Insert terrarium failed.")
-    return TerrariumOut(**res.data[0])
-
-@app.delete("/api/terrariums/{terrarium_id}")
-def delete_terrarium(terrarium_id: int) -> Dict[str, Any]:
-    sb = _require_supabase()
-    res = sb.table("terrariums").delete().eq("id", terrarium_id).execute()
-    # Supabase retourne parfois [] même si OK selon config; on renvoie ok quand même
-    return {"ok": True, "deleted_id": terrarium_id}
-
-@app.post("/api/readings")
-async def create_reading(payload: ReadingIn) -> Dict[str, Any]:
-    """
-    Tu peux appeler ça depuis ton ESP32 / ton script capteur.
-    Exemple:
-      POST https://<render>/api/readings
-      { "sensor_id":"A-01", "temperature":24.8, "humidity":72.0 }
-    """
-    sb = _require_supabase()
-
-    ts = payload.ts or datetime.utcnow().isoformat()
-
-    # 1) Update last values in terrariums by sensor_id
-    upd = (
-        sb.table("terrariums")
-        .update({"last_temperature": payload.temperature, "last_humidity": payload.humidity})
-        .eq("sensor_id", payload.sensor_id)
-        .execute()
-    )
-
-    # 2) (Optionnel) si tu as une table "readings", tu peux l’enregistrer
-    #    Décommente si tu crées la table readings(sensor_id, temperature, humidity, ts)
-    # sb.table("readings").insert({
-    #     "sensor_id": payload.sensor_id,
-    #     "temperature": payload.temperature,
-    #     "humidity": payload.humidity,
-    #     "ts": ts
-    # }).execute()
-
-    # 3) Broadcast WS
-    if READINGS_BROADCAST:
-        await ws_manager.broadcast(
-            {
-                "type": "reading",
-                "sensor_id": payload.sensor_id,
-                "temperature": payload.temperature,
-                "humidity": payload.humidity,
-                "ts": ts,
-            }
-        )
-
-    return {"ok": True, "sensor_id": payload.sensor_id, "ts": ts}
 
 @app.websocket(WS_PATH)
 async def ws_sensor(ws: WebSocket) -> None:
     await ws_manager.connect(ws)
     try:
-        # petit hello
-        await ws.send_text(json.dumps({"type": "hello", "ws": WS_PATH}))
         while True:
-            # On reçoit parfois "ping" du front
             msg = await ws.receive_text()
-            if msg.strip().lower() == "ping":
-                await ws.send_text(json.dumps({"type": "pong"}))
+            if msg == "ping":
+                await ws.send_text("pong")
     except WebSocketDisconnect:
-        pass
-    finally:
-        await ws_manager.disconnect(ws)
+        ws_manager.disconnect(ws)
+    except Exception:
+        ws_manager.disconnect(ws)
+
+
+# -------------------------
+# Helpers: last reading by sensor_id
+# -------------------------
+def _get_last_by_sensor(sensor_id: str) -> Optional[Dict[str, Any]]:
+    readings = _read_json(READINGS_FILE, [])
+    if not isinstance(readings, list):
+        return None
+    for item in reversed(readings):
+        if str(item.get("sensor_id", "")).strip() == sensor_id:
+            return item
+    return None
+
+
+def _enrich_terrarium(t: Dict[str, Any]) -> Dict[str, Any]:
+    sensor_id = str(t.get("sensor_id", "")).strip()
+    last = _get_last_by_sensor(sensor_id) if sensor_id else None
+    return {
+        **t,
+        "last_temperature": last.get("temperature") if last else None,
+        "last_humidity": last.get("humidity") if last else None,
+        "last_ts": last.get("ts") if last else None,
+    }
+
+
+# -------------------------
+# Routes
+# -------------------------
+@app.get("/health")
+def health() -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "name": APP_NAME,
+        "ws_path": WS_PATH,
+        "allowed_origins": ALLOWED_ORIGINS,
+        "allow_vercel_regex": ALLOW_VERCEL_REGEX,
+    }
+
+
+@app.get("/api/terrariums")
+def list_terrariums() -> List[Dict[str, Any]]:
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    out: List[Dict[str, Any]] = []
+    for t in terrariums:
+        out.append(_enrich_terrarium(t))
+    return out
+
+
+@app.get("/api/terrariums/{terrarium_id}")
+def get_terrarium(terrarium_id: int) -> Dict[str, Any]:
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    for t in terrariums:
+        if int(t.get("id", -1)) == terrarium_id:
+            return _enrich_terrarium(t)
+
+    raise HTTPException(status_code=404, detail="terrarium introuvable")
+
+
+@app.post("/api/terrariums")
+def create_terrarium(payload: Dict[str, Any]) -> Dict[str, Any]:
+    name = str(payload.get("name", "")).strip()
+    sensor_id = str(payload.get("sensor_id", "")).strip()
+    species = payload.get("species", None)
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name requis")
+    if not sensor_id:
+        raise HTTPException(status_code=400, detail="sensor_id requis")
+
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    # éviter doublon sensor_id
+    for t in terrariums:
+        if str(t.get("sensor_id", "")).strip() == sensor_id:
+            raise HTTPException(status_code=400, detail="sensor_id déjà utilisé")
+
+    item = {
+        "id": _next_id(terrariums),
+        "name": name,
+        "sensor_id": sensor_id,
+        "species": species,
+        "target_temp": payload.get("target_temp", None),
+        "target_humidity": payload.get("target_humidity", None),
+        "status": payload.get("status", "ok"),
+        "created_at": time.time(),
+    }
+
+    terrariums.append(item)
+    _write_json(TERRARIUMS_FILE, terrariums)
+    return {"ok": True, "terrarium": item}
+
+
+@app.put("/api/terrariums/{terrarium_id}")
+def update_terrarium(terrarium_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    idx = None
+    for i, t in enumerate(terrariums):
+        if int(t.get("id", -1)) == terrarium_id:
+            idx = i
+            break
+    if idx is None:
+        raise HTTPException(status_code=404, detail="terrarium introuvable")
+
+    name = str(payload.get("name", terrariums[idx].get("name", ""))).strip()
+    sensor_id = str(payload.get("sensor_id", terrariums[idx].get("sensor_id", ""))).strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name requis")
+    if not sensor_id:
+        raise HTTPException(status_code=400, detail="sensor_id requis")
+
+    # éviter doublon sensor_id (sauf lui-même)
+    for t in terrariums:
+        if int(t.get("id", -1)) != terrarium_id and str(t.get("sensor_id", "")).strip() == sensor_id:
+            raise HTTPException(status_code=400, detail="sensor_id déjà utilisé")
+
+    terrariums[idx] = {
+        **terrariums[idx],
+        "name": name,
+        "species": payload.get("species", terrariums[idx].get("species", None)),
+        "sensor_id": sensor_id,
+        "target_temp": payload.get("target_temp", terrariums[idx].get("target_temp", None)),
+        "target_humidity": payload.get("target_humidity", terrariums[idx].get("target_humidity", None)),
+        "status": payload.get("status", terrariums[idx].get("status", "ok")),
+        "updated_at": time.time(),
+    }
+
+    _write_json(TERRARIUMS_FILE, terrariums)
+    return {"ok": True, "terrarium": terrariums[idx]}
+
+
+@app.delete("/api/terrariums/{terrarium_id}")
+def delete_terrarium(terrarium_id: int) -> Dict[str, Any]:
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    before = len(terrariums)
+    terrariums = [t for t in terrariums if int(t.get("id", -1)) != terrarium_id]
+    after = len(terrariums)
+
+    if after == before:
+        raise HTTPException(status_code=404, detail="terrarium introuvable")
+
+    _write_json(TERRARIUMS_FILE, terrariums)
+    return {"ok": True}
+
+
+@app.post("/api/readings")
+async def create_reading(payload: Dict[str, Any]) -> Dict[str, Any]:
+    sensor_id = str(payload.get("sensor_id", "")).strip()
+    temperature = payload.get("temperature", None)
+    humidity = payload.get("humidity", None)
+
+    if not sensor_id:
+        raise HTTPException(status_code=400, detail="sensor_id requis")
+
+    item = {
+        "ts": time.time(),
+        "sensor_id": sensor_id,
+        "temperature": temperature,
+        "humidity": humidity,
+        "type": "sensor_reading",
+    }
+
+    readings = _read_json(READINGS_FILE, [])
+    if not isinstance(readings, list):
+        readings = []
+
+    readings.append(item)
+    _write_json(READINGS_FILE, readings[-2000:])
+
+    await ws_manager.broadcast(item)
+    return {"ok": True}
+
+
+# -------------------------
+# Simulation (optionnel)
+# -------------------------
+async def _sim_loop() -> None:
+    import random
+
+    while True:
+        await asyncio.sleep(SIM_INTERVAL_SEC)
+        terrariums = _read_json(TERRARIUMS_FILE, [])
+        if not isinstance(terrariums, list) or not terrariums:
+            continue
+
+        for t in terrariums:
+            sid = str(t.get("sensor_id", "")).strip()
+            if not sid:
+                continue
+            item = {
+                "ts": time.time(),
+                "sensor_id": sid,
+                "temperature": round(24.0 + random.random() * 4.0, 2),
+                "humidity": round(55.0 + random.random() * 20.0, 2),
+                "type": "sensor_reading",
+            }
+            readings = _read_json(READINGS_FILE, [])
+            if not isinstance(readings, list):
+                readings = []
+            readings.append(item)
+            _write_json(READINGS_FILE, readings[-2000:])
+            await ws_manager.broadcast(item)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    if SIM_ENABLED:
+        asyncio.create_task(_sim_loop())

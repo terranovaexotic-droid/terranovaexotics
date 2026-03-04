@@ -1,3 +1,5 @@
+export const API_BASE = "https://terranova-backend-dpqj.onrender.com"
+export const WS_URL = "wss://terranova-backend-dpqj.onrender.com/ws/sensor"
 export const API_BASE =
   import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 

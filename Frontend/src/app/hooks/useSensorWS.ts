@@ -33,7 +33,9 @@ export function useSensorWS() {
 
     return () => {
       clearInterval(ping);
-      try { ws.close(); } catch {}
+      try {
+        ws.close();
+      } catch {}
     };
   }, [url]);
 
