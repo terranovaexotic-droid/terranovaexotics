@@ -1,39 +1,30 @@
-import { useEffect,useState } from "react"
-import { API_BASE } from "../lib/config"
+import { useEffect, useState } from "react";
+import { WS_URL } from "../lib/config";
 
-export default function Sensors(){
+export default function Sensors() {
+  const [data, setData] = useState<any>(null);
 
-  const [readings,setReadings] = useState([])
+  useEffect(() => {
+    const ws = new WebSocket(WS_URL);
 
-  async function load(){
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
 
-    const res = await fetch(`${API_BASE}/api/readings`)
+      if (msg.type === "reading") {
+        setData(msg);
+      }
+    };
 
-    const data = await res.json()
+    return () => ws.close();
+  }, []);
 
-    setReadings(data)
+  if (!data) return <div>Capteur en attente...</div>;
 
-  }
-
-  useEffect(()=>{
-    load()
-  },[])
-
-  return(
-
+  return (
     <div>
-
-      <h2>Sensor Readings</h2>
-
-      {readings.map((r:any)=>(
-        <div key={r.id}>
-
-          {r.sensor_id} — {r.temperature}°C — {r.humidity}%
-
-        </div>
-      ))}
-
+      <h3>Capteur {data.sensor_id}</h3>
+      <p>Température : {data.temperature}°C</p>
+      <p>Humidité : {data.humidity}%</p>
     </div>
-
-  )
+  );
 }

@@ -1,71 +1,40 @@
-import { useState } from "react"
-import { API_BASE } from "../lib/config"
+import { useState } from "react";
+import { API_BASE } from "../lib/config";
 
-export default function AddTerrarium(){
+export default function AddTerrarium({ onAdded }: any) {
+  const [name, setName] = useState("");
+  const [sensorId, setSensorId] = useState("");
 
-  const [name,setName] = useState("")
-  const [species,setSpecies] = useState("")
-  const [sensor,setSensor] = useState("")
-
-  async function createTerrarium(){
-
-    await fetch(`${API_BASE}/api/terrariums`,{
-
-      method:"POST",
-
-      headers:{
-        "Content-Type":"application/json"
+  async function add() {
+    await fetch(`${API_BASE}/api/terrariums`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        name,
+        sensor_id: sensorId,
+      }),
+    });
 
-      body:JSON.stringify({
-        name:name,
-        species:species,
-        sensor_id:sensor
-      })
-
-    })
-
-    alert("Terrarium created")
-
-    setName("")
-    setSpecies("")
-    setSensor("")
+    if (onAdded) onAdded();
   }
 
-  return(
-
+  return (
     <div>
-
-      <h2>Add Terrarium</h2>
-
       <input
-      placeholder="Name"
-      value={name}
-      onChange={(e)=>setName(e.target.value)}
+        placeholder="Nom"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
       />
 
-      <br/>
-
       <input
-      placeholder="Species"
-      value={species}
-      onChange={(e)=>setSpecies(e.target.value)}
+        placeholder="Sensor ID"
+        value={sensorId}
+        onChange={(e) => setSensorId(e.target.value)}
       />
 
-      <br/>
-
-      <input
-      placeholder="Sensor ID"
-      value={sensor}
-      onChange={(e)=>setSensor(e.target.value)}
-      />
-
-      <br/>
-
-      <button onClick={createTerrarium}>
-        Create
-      </button>
-
+      <button onClick={add}>Ajouter</button>
     </div>
-  )
+  );
 }
