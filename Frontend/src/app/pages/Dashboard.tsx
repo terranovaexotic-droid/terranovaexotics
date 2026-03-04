@@ -1,237 +1,214 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiGet } from "../lib/api";
-import { useSensorWS } from "../hooks/useSensorWS";
+import { MainLayout } from "../components/MainLayout";
+import { MetricCard } from "../components/MetricCard";
+import { TerrariumCard } from "../components/TerrariumCard";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { 
+  Box, 
+  AlertTriangle, 
+  Activity, 
+  TrendingUp,
+  Plus,
+  Bell
+} from "lucide-react";
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useNavigate } from "react-router";
 
-type Terrarium = {
-  id: number;
-  name: string;
-  species?: string | null;
-  sensor_id: string;
-  target_temp?: number | null;
-  target_humidity?: number | null;
-  status?: string | null;
-  last_temperature?: number | null;
-  last_humidity?: number | null;
-};
+// Mock data
+const temperatureData = [
+  { time: "00:00", value: 24 },
+  { time: "04:00", value: 23 },
+  { time: "08:00", value: 25 },
+  { time: "12:00", value: 27 },
+  { time: "16:00", value: 26 },
+  { time: "20:00", value: 25 },
+];
 
-type SensorReadingMsg = {
-  type: "sensor_reading";
-  sensor_id: string;
-  temperature: number | null;
-  humidity: number | null;
-};
+const humidityData = [
+  { time: "00:00", value: 65 },
+  { time: "04:00", value: 70 },
+  { time: "08:00", value: 68 },
+  { time: "12:00", value: 62 },
+  { time: "16:00", value: 65 },
+  { time: "20:00", value: 68 },
+];
 
-function isSensorReadingMsg(x: unknown): x is SensorReadingMsg {
-  if (!x || typeof x !== "object") return false;
-  const o = x as any;
-  return (
-    o.type === "sensor_reading" &&
-    typeof o.sensor_id === "string" &&
-    ("temperature" in o) &&
-    ("humidity" in o)
-  );
-}
+const terrariums = [
+  { id: "1", name: "Terrarium Python", species: "Python regius", temperature: 28, humidity: 65, status: "ok" as const, lastUpdate: "il y a 2 min" },
+  { id: "2", name: "Terrarium Gecko", species: "Correlophus ciliatus", temperature: 22, humidity: 75, status: "ok" as const, lastUpdate: "il y a 5 min" },
+  { id: "3", name: "Terrarium Dragon", species: "Pogona vitticeps", temperature: 35, humidity: 40, status: "warning" as const, lastUpdate: "il y a 1 min" },
+];
 
-function badgeClassesForWS(status: string) {
-  if (status === "open" || status === "connected") {
-    return "bg-emerald-500/10 text-emerald-200 border-emerald-500/30";
-  }
-  if (status === "connecting") {
-    return "bg-amber-500/10 text-amber-200 border-amber-500/30";
-  }
-  return "bg-rose-500/10 text-rose-200 border-rose-500/30";
-}
-
-function statusDotForTerrarium(t: Terrarium) {
-  const hasData = t.last_temperature != null && t.last_humidity != null;
-  return hasData ? "bg-emerald-400" : "bg-zinc-500";
-}
+const alerts = [
+  { id: "1", type: "warning", message: "Température élevée - Terrarium Dragon", time: "Il y a 10 min" },
+  { id: "2", type: "info", message: "Entretien prévu aujourd'hui - Terrarium Python", time: "Il y a 1h" },
+];
 
 export default function Dashboard() {
-  const [terrariums, setTerrariums] = useState<Terrarium[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const { status: wsStatus, lastMessage } = useSensorWS();
-
-  // load initial
-  useEffect(() => {
-    (async () => {
-      try {
-        setError(null);
-        const data = await apiGet<Terrarium[]>("/api/terrariums");
-        setTerrariums(data);
-      } catch (e: any) {
-        setError(e?.message || "Erreur lors du chargement des terrariums.");
-      }
-    })();
-  }, []);
-
-  // apply realtime updates
-  useEffect(() => {
-    if (!isSensorReadingMsg(lastMessage)) return;
-
-    const { sensor_id, temperature, humidity } = lastMessage;
-
-    setTerrariums((prev) =>
-      prev.map((t) =>
-        t.sensor_id === sensor_id
-          ? { ...t, last_temperature: temperature, last_humidity: humidity }
-          : t
-      )
-    );
-  }, [lastMessage]);
-
-  const total = terrariums.length;
-
-  const onlineCount = useMemo(() => {
-    return terrariums.filter(
-      (t) => t.last_temperature != null && t.last_humidity != null
-    ).length;
-  }, [terrariums]);
-
-  const avgTemp = useMemo(() => {
-    const vals = terrariums
-      .map((t) => t.last_temperature)
-      .filter((v): v is number => typeof v === "number");
-    if (!vals.length) return null;
-    const sum = vals.reduce((a, b) => a + b, 0);
-    return sum / vals.length;
-  }, [terrariums]);
-
-  const avgHum = useMemo(() => {
-    const vals = terrariums
-      .map((t) => t.last_humidity)
-      .filter((v): v is number => typeof v === "number");
-    if (!vals.length) return null;
-    const sum = vals.reduce((a, b) => a + b, 0);
-    return sum / vals.length;
-  }, [terrariums]);
+  const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-[#0C0F0E] text-[#E8F5F2]">
-      <div className="p-6 max-w-7xl mx-auto">
+    <MainLayout>
+      <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-            <div className="mt-2 flex items-center gap-2 text-sm text-white/70">
-              <span>WebSocket</span>
-              <span
-                className={[
-                  "px-2 py-1 rounded-md border text-xs font-medium",
-                  badgeClassesForWS(String(wsStatus || "closed")),
-                ].join(" ")}
-              >
-                {String(wsStatus || "closed")}
-              </span>
-            </div>
+            <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+            <p className="text-gray-400 mt-1">Vue d'ensemble de votre élevage</p>
           </div>
-
-          <div className="flex gap-2">
-            <div className="px-3 py-2 rounded-xl border border-white/10 bg-white/5">
-              <div className="text-xs text-white/60">Terrariums</div>
-              <div className="text-lg font-semibold">{total}</div>
-            </div>
-            <div className="px-3 py-2 rounded-xl border border-emerald-400/20 bg-emerald-500/5">
-              <div className="text-xs text-white/60">Avec données</div>
-              <div className="text-lg font-semibold">{onlineCount}</div>
-            </div>
-            <div className="px-3 py-2 rounded-xl border border-[#D4AF37]/20 bg-[#D4AF37]/5">
-              <div className="text-xs text-white/60">Temp. moyenne</div>
-              <div className="text-lg font-semibold">
-                {avgTemp == null ? "—" : avgTemp.toFixed(1)}°C
-              </div>
-            </div>
-            <div className="px-3 py-2 rounded-xl border border-[#D4AF37]/20 bg-[#D4AF37]/5">
-              <div className="text-xs text-white/60">Hum. moyenne</div>
-              <div className="text-lg font-semibold">
-                {avgHum == null ? "—" : avgHum.toFixed(0)}%
-              </div>
-            </div>
-          </div>
+          <Button 
+            className="bg-[#D4AF37] hover:bg-[#B8860B] text-black"
+            onClick={() => navigate("/terrariums/add")}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Nouveau terrarium
+          </Button>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div className="mt-4 rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-rose-100">
-            {error}
+        {/* Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard
+            title="Terrariums actifs"
+            value={terrariums.length}
+            icon={Box}
+            trend={{ value: "+1 ce mois", isPositive: true }}
+            status="ok"
+          />
+          <MetricCard
+            title="Alertes actives"
+            value={1}
+            icon={AlertTriangle}
+            status="warning"
+            subtitle="1 nécessite attention"
+          />
+          <MetricCard
+            title="Tâches du jour"
+            value={3}
+            icon={Activity}
+            subtitle="2 complétées"
+          />
+          <MetricCard
+            title="Taux de santé"
+            value="98%"
+            icon={TrendingUp}
+            trend={{ value: "+2% ce mois", isPositive: true }}
+            status="ok"
+          />
+        </div>
+
+        {/* Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className="bg-[#121212] border-[#D4AF37]/20">
+            <CardHeader>
+              <CardTitle className="text-white">Température moyenne (24h)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={temperatureData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                  <XAxis dataKey="time" stroke="#9CA3AF" />
+                  <YAxis stroke="#9CA3AF" />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: "#1A1A1A", border: "1px solid #D4AF37" }}
+                    labelStyle={{ color: "#F5F5F5" }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="value" 
+                    stroke="#D4AF37" 
+                    strokeWidth={2}
+                    dot={{ fill: "#D4AF37" }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-[#121212] border-[#D4AF37]/20">
+            <CardHeader>
+              <CardTitle className="text-white">Humidité moyenne (24h)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={250}>
+                <AreaChart data={humidityData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                  <XAxis dataKey="time" stroke="#9CA3AF" />
+                  <YAxis stroke="#9CA3AF" />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: "#1A1A1A", border: "1px solid #10B981" }}
+                    labelStyle={{ color: "#F5F5F5" }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="value" 
+                    stroke="#10B981" 
+                    fill="#10B981"
+                    fillOpacity={0.2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Terrariums Grid */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-white">Terrariums récents</h2>
+            <Button 
+              variant="outline" 
+              className="border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/10"
+              onClick={() => navigate("/terrariums")}
+            >
+              Voir tout
+            </Button>
           </div>
-        )}
-
-        {/* List */}
-        <div className="mt-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Terrariums</h2>
-            <div className="text-sm text-white/60">
-              {onlineCount}/{total} actifs
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {terrariums.map((t) => (
-              <div
-                key={t.id}
-                className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={[
-                          "inline-block h-2.5 w-2.5 rounded-full",
-                          statusDotForTerrarium(t),
-                        ].join(" ")}
-                        title="Statut données"
-                      />
-                      <div className="font-semibold truncate">{t.name}</div>
-                    </div>
-
-                    <div className="mt-1 text-sm text-white/60 truncate">
-                      {t.species || "Espèce non définie"}
-                    </div>
-
-                    <div className="mt-2 text-xs text-white/50">
-                      Capteur: <span className="text-white/70 font-medium">{t.sensor_id}</span>
-                    </div>
-                  </div>
-
-                  <div className="text-xs px-2 py-1 rounded-lg border border-[#D4AF37]/25 bg-[#D4AF37]/10 text-[#F3E7B6]">
-                    {t.status || "ok"}
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-white/60">Température</div>
-                    <div className="mt-1 text-lg font-semibold">
-                      {t.last_temperature == null ? "—" : t.last_temperature.toFixed(1)}°C
-                    </div>
-                    <div className="mt-1 text-xs text-white/45">
-                      Cible: {t.target_temp == null ? "—" : `${t.target_temp.toFixed(1)}°C`}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-white/60">Humidité</div>
-                    <div className="mt-1 text-lg font-semibold">
-                      {t.last_humidity == null ? "—" : `${Math.round(t.last_humidity)}%`}
-                    </div>
-                    <div className="mt-1 text-xs text-white/45">
-                      Cible: {t.target_humidity == null ? "—" : `${Math.round(t.target_humidity)}%`}
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {terrariums.map((terrarium) => (
+              <TerrariumCard
+                key={terrarium.id}
+                {...terrarium}
+                onClick={() => navigate(`/terrariums/${terrarium.id}`)}
+              />
             ))}
-
-            {terrariums.length === 0 && !error && (
-              <div className="col-span-full rounded-2xl border border-white/10 bg-white/5 p-6 text-white/70">
-                Aucun terrarium trouvé. Vérifiez que l’API `/api/terrariums` retourne bien des données.
-              </div>
-            )}
           </div>
         </div>
+
+        {/* Alerts */}
+        <Card className="bg-[#121212] border-[#D4AF37]/20">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-white flex items-center gap-2">
+                <Bell className="w-5 h-5 text-[#D4AF37]" />
+                Alertes récentes
+              </CardTitle>
+              <Button 
+                variant="ghost" 
+                className="text-[#D4AF37] hover:text-[#FFD700]"
+                onClick={() => navigate("/notifications")}
+              >
+                Voir tout
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {alerts.map((alert) => (
+                <div 
+                  key={alert.id} 
+                  className="flex items-start gap-3 p-3 rounded-lg bg-[#1A1A1A] hover:bg-[#262626] transition-colors"
+                >
+                  <AlertTriangle className={`w-5 h-5 mt-0.5 ${alert.type === "warning" ? "text-[#F59E0B]" : "text-[#10B981]"}`} />
+                  <div className="flex-1">
+                    <p className="text-sm text-white">{alert.message}</p>
+                    <p className="text-xs text-gray-500 mt-1">{alert.time}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
-    </div>
+    </MainLayout>
   );
 }
