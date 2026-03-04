@@ -1,32 +1,57 @@
-import { createBrowserRouter } from "react-router";
+import { API_BASE } from "./config";
 
-import Dashboard from "./pages/Dashboard";
-import TerrariumsList from "./pages/TerrariumsList";
-import TerrariumDetail from "./pages/TerrariumDetail";
-import AddTerrarium from "./pages/AddTerrarium";
-import Inventory from "./pages/Inventory";
-import AddInventoryItem from "./pages/AddInventoryItem";
-import Tasks from "./pages/Tasks";
-import Notifications from "./pages/Notifications";
-import Statistics from "./pages/Statistics";
-import Settings from "./pages/Settings";
-import Users from "./pages/Users";
-import Sensors from "./pages/Sensors";
-import NotFound from "./pages/NotFound";
+async function parseJson(res: Response) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return text;
+  }
+}
 
-export const router = createBrowserRouter([
-  { path: "/", Component: Dashboard },
-  { path: "/terrariums", Component: TerrariumsList },
-  { path: "/terrariums/:id", Component: TerrariumDetail },
-  { path: "/terrariums/add", Component: AddTerrarium },
-  { path: "/terrariums/:id/edit", Component: AddTerrarium },
-  { path: "/inventory", Component: Inventory },
-  { path: "/inventory/add", Component: AddInventoryItem },
-  { path: "/tasks", Component: Tasks },
-  { path: "/notifications", Component: Notifications },
-  { path: "/statistics", Component: Statistics },
-  { path: "/sensors", Component: Sensors },
-  { path: "/settings", Component: Settings },
-  { path: "/users", Component: Users },
-  { path: "*", Component: NotFound },
-]);
+export async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const body = await parseJson(res);
+    throw new Error(body?.detail || body?.error || `GET ${path} failed`);
+  }
+  return (await res.json()) as T;
+}
+
+export async function apiPost<T>(path: string, data: any): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await parseJson(res);
+    throw new Error(body?.detail || body?.error || `POST ${path} failed`);
+  }
+  return (await res.json()) as T;
+}
+
+export async function apiPut<T>(path: string, data: any): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await parseJson(res);
+    throw new Error(body?.detail || body?.error || `PUT ${path} failed`);
+  }
+  return (await res.json()) as T;
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await parseJson(res);
+    throw new Error(body?.detail || body?.error || `DELETE ${path} failed`);
+  }
+  return (await res.json()) as T;
+}
