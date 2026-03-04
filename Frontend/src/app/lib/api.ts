@@ -55,3 +55,18 @@ export async function apiDelete<T>(path: string): Promise<T> {
   }
   return (await res.json()) as T;
 }
+
+export async function apiPut<T>(path: string, data: any): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let body: any = null;
+    try { body = text ? JSON.parse(text) : null; } catch {}
+    throw new Error(body?.detail || body?.error || `PUT ${path} failed`);
+  }
+  return (await res.json()) as T;
+}

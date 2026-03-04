@@ -48,10 +48,11 @@ app.add_middleware(
 )
 
 # -------------------------
-# Storage (JSON simple)
+# Storage (JSON simple) + support DATA_DIR (cloud disk)
 # -------------------------
 BASE_DIR = os.path.dirname(__file__)
-DATA_DIR = os.path.join(BASE_DIR, "data")
+
+DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
 
 TERRARIUMS_FILE = os.path.join(DATA_DIR, "terrariums.json")
@@ -174,6 +175,8 @@ def health() -> Dict[str, Any]:
         "ws_path": WS_PATH,
         "allowed_origins": ALLOWED_ORIGINS,
         "allow_vercel_regex": ALLOW_VERCEL_REGEX,
+        "data_dir": DATA_DIR,
+        "sim_enabled": SIM_ENABLED,
     }
 
 
@@ -182,11 +185,7 @@ def list_terrariums() -> List[Dict[str, Any]]:
     terrariums = _read_json(TERRARIUMS_FILE, [])
     if not isinstance(terrariums, list):
         terrariums = []
-
-    out: List[Dict[str, Any]] = []
-    for t in terrariums:
-        out.append(_enrich_terrarium(t))
-    return out
+    return [_enrich_terrarium(t) for t in terrariums]
 
 
 @app.get("/api/terrariums/{terrarium_id}")
@@ -321,8 +320,103 @@ async def create_reading(payload: Dict[str, Any]) -> Dict[str, Any]:
     readings.append(item)
     _write_json(READINGS_FILE, readings[-2000:])
 
+    # push en temps réel
     await ws_manager.broadcast(item)
     return {"ok": True}
+
+
+# -------------------------
+# Sensors (réels, basés sur les readings)
+# -------------------------
+@app.get("/api/sensors")
+def list_sensors() -> List[Dict[str, Any]]:
+    """
+    Liste des capteurs détectés d'après les readings.
+    Un capteur "existe" dès qu'on a reçu au moins une lecture.
+    """
+    readings = _read_json(READINGS_FILE, [])
+    if not isinstance(readings, list):
+        readings = []
+
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    terr_map: Dict[str, Dict[str, Any]] = {}
+    for t in terrariums:
+        sid = str(t.get("sensor_id", "")).strip()
+        if sid:
+            terr_map[sid] = t
+
+    last_by: Dict[str, Dict[str, Any]] = {}
+    for r in readings:
+        sid = str(r.get("sensor_id", "")).strip()
+        if not sid:
+            continue
+        last_by[sid] = r
+
+    out: List[Dict[str, Any]] = []
+    now = time.time()
+    for sid, last in last_by.items():
+        ts = float(last.get("ts") or 0.0)
+        age_sec = max(0.0, now - ts)
+        online = age_sec <= 120.0  # 2 minutes
+
+        t = terr_map.get(sid)
+        out.append(
+            {
+                "sensor_id": sid,
+                "last_ts": ts,
+                "age_sec": round(age_sec, 1),
+                "online": online,
+                "temperature": last.get("temperature"),
+                "humidity": last.get("humidity"),
+                "terrarium": (
+                    {"id": t.get("id"), "name": t.get("name"), "species": t.get("species")}
+                    if t
+                    else None
+                ),
+            }
+        )
+
+    out.sort(key=lambda x: (not x["online"], -(x["last_ts"] or 0)))
+    return out
+
+
+@app.get("/api/sensors/{sensor_id}")
+def get_sensor(sensor_id: str) -> Dict[str, Any]:
+    sensor_id = str(sensor_id).strip()
+    if not sensor_id:
+        raise HTTPException(status_code=400, detail="sensor_id requis")
+
+    last = _get_last_by_sensor(sensor_id)
+    if not last:
+        raise HTTPException(status_code=404, detail="capteur introuvable")
+
+    now = time.time()
+    ts = float(last.get("ts") or 0.0)
+    age_sec = max(0.0, now - ts)
+    online = age_sec <= 120.0
+
+    terrariums = _read_json(TERRARIUMS_FILE, [])
+    if not isinstance(terrariums, list):
+        terrariums = []
+
+    terr = None
+    for t in terrariums:
+        if str(t.get("sensor_id", "")).strip() == sensor_id:
+            terr = {"id": t.get("id"), "name": t.get("name"), "species": t.get("species")}
+            break
+
+    return {
+        "sensor_id": sensor_id,
+        "last_ts": ts,
+        "age_sec": round(age_sec, 1),
+        "online": online,
+        "temperature": last.get("temperature"),
+        "humidity": last.get("humidity"),
+        "terrarium": terr,
+    }
 
 
 # -------------------------
